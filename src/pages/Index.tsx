@@ -22,10 +22,6 @@ type LevelConfig = {
   gridColor: string;
   minGap: number;
   maxGap: number;
-  musicScale: number[];
-  musicTempo: number;
-  musicType: OscillatorType;
-  musicVolume: number;
 };
 
 const LEVELS: LevelConfig[] = [
@@ -43,10 +39,6 @@ const LEVELS: LevelConfig[] = [
     gridColor: "rgba(80,40,180,0.13)",
     minGap: 260,
     maxGap: 340,
-    musicScale: [392, 440, 494, 523, 587, 523, 494, 440, 392, 349, 330, 349, 392, 440, 494, 523],
-    musicTempo: 0.18,
-    musicType: "square",
-    musicVolume: 0.055,
   },
   {
     id: 2,
@@ -62,10 +54,6 @@ const LEVELS: LevelConfig[] = [
     gridColor: "rgba(0,180,80,0.12)",
     minGap: 210,
     maxGap: 290,
-    musicScale: [330, 370, 415, 440, 494, 440, 415, 370, 330, 294, 262, 294, 330, 370, 415, 440],
-    musicTempo: 0.15,
-    musicType: "triangle",
-    musicVolume: 0.07,
   },
   {
     id: 3,
@@ -81,10 +69,6 @@ const LEVELS: LevelConfig[] = [
     gridColor: "rgba(200,80,0,0.13)",
     minGap: 170,
     maxGap: 250,
-    musicScale: [523, 587, 659, 698, 784, 698, 659, 587, 523, 466, 415, 466, 523, 587, 659, 698],
-    musicTempo: 0.13,
-    musicType: "sawtooth",
-    musicVolume: 0.05,
   },
 ];
 
@@ -147,33 +131,206 @@ function playDeathSound(ctx: AudioContext) {
   osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.45);
 }
 
-function playLevelMusic(ctx: AudioContext, cfg: LevelConfig) {
-  cfg.musicScale.forEach((freq, i) => {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.type = cfg.musicType;
-    osc.frequency.value = freq;
-    const t = ctx.currentTime + i * cfg.musicTempo;
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(cfg.musicVolume, t + 0.02);
-    gain.gain.linearRampToValueAtTime(cfg.musicVolume * 0.6, t + cfg.musicTempo - 0.02);
-    gain.gain.linearRampToValueAtTime(0, t + cfg.musicTempo);
-    osc.start(t); osc.stop(t + cfg.musicTempo);
+// ---- helper: single note ----
+function note(
+  ctx: AudioContext, freq: number, t: number, dur: number,
+  type: OscillatorType, vol: number, dest: AudioNode
+) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.connect(g); g.connect(dest);
+  osc.type = type;
+  osc.frequency.value = freq;
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(vol, t + 0.01);
+  g.gain.setValueAtTime(vol, t + dur - 0.02);
+  g.gain.linearRampToValueAtTime(0, t + dur);
+  osc.start(t); osc.stop(t + dur + 0.02);
+}
 
-    // bass note every 4 beats
-    if (i % 4 === 0) {
-      const bass = ctx.createOscillator();
-      const bassGain = ctx.createGain();
-      bass.connect(bassGain); bassGain.connect(ctx.destination);
-      bass.type = "sine";
-      bass.frequency.value = freq / 2;
-      bassGain.gain.setValueAtTime(0, t);
-      bassGain.gain.linearRampToValueAtTime(cfg.musicVolume * 0.8, t + 0.01);
-      bassGain.gain.linearRampToValueAtTime(0, t + cfg.musicTempo * 2);
-      bass.start(t); bass.stop(t + cfg.musicTempo * 2);
-    }
+// ---- kick drum ----
+function kick(ctx: AudioContext, t: number, dest: AudioNode) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.connect(g); g.connect(dest);
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(180, t);
+  osc.frequency.exponentialRampToValueAtTime(30, t + 0.12);
+  g.gain.setValueAtTime(0.5, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+  osc.start(t); osc.stop(t + 0.16);
+}
+
+// ---- snare ----
+function snare(ctx: AudioContext, t: number, dest: AudioNode) {
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.1, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const g = ctx.createGain();
+  src.connect(g); g.connect(dest);
+  g.gain.setValueAtTime(0.18, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  src.start(t); src.stop(t + 0.11);
+}
+
+// ---- hihat ----
+function hihat(ctx: AudioContext, t: number, vol: number, dest: AudioNode) {
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.05, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const flt = ctx.createBiquadFilter();
+  flt.type = "highpass"; flt.frequency.value = 7000;
+  const g = ctx.createGain();
+  src.connect(flt); flt.connect(g); g.connect(dest);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+  src.start(t); src.stop(t + 0.06);
+}
+
+// ---- wobble bass (dubstep) ----
+function wobbleBass(ctx: AudioContext, t: number, freq: number, dur: number, dest: AudioNode) {
+  const osc = ctx.createOscillator();
+  const lfo = ctx.createOscillator();
+  const lfoGain = ctx.createGain();
+  const flt = ctx.createBiquadFilter();
+  const g = ctx.createGain();
+
+  osc.type = "sawtooth"; osc.frequency.value = freq;
+  flt.type = "lowpass"; flt.frequency.value = 400; flt.Q.value = 8;
+  lfo.type = "sine"; lfo.frequency.value = 6;
+  lfoGain.gain.value = 800;
+
+  lfo.connect(lfoGain); lfoGain.connect(flt.frequency);
+  osc.connect(flt); flt.connect(g); g.connect(dest);
+
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(0.22, t + 0.02);
+  g.gain.setValueAtTime(0.22, t + dur - 0.04);
+  g.gain.linearRampToValueAtTime(0, t + dur);
+
+  lfo.start(t); lfo.stop(t + dur + 0.02);
+  osc.start(t); osc.stop(t + dur + 0.02);
+}
+
+// ============================================================
+// LEVEL 1 — "STEREO MADNESS" style: energetic electro + arp
+// ============================================================
+function playTrack1(ctx: AudioContext) {
+  const master = ctx.createGain();
+  master.gain.value = 0.7;
+  master.connect(ctx.destination);
+  const T = ctx.currentTime + 0.05;
+  const bpm = 140; const b = 60 / bpm; // beat duration
+
+  // Arpeggio melody — bright sawtooth
+  const arp = [523, 659, 784, 659, 523, 415, 523, 659, 784, 880, 784, 659, 523, 659, 784, 1047];
+  arp.forEach((f, i) => note(ctx, f, T + i * b * 0.5, b * 0.45, "sawtooth", 0.06, master));
+
+  // Counter melody
+  const mel2 = [262, 330, 392, 330, 294, 370, 440, 370];
+  mel2.forEach((f, i) => note(ctx, f, T + i * b, b * 0.9, "square", 0.04, master));
+
+  // Bass line
+  const bassLine = [131, 131, 98, 110, 131, 131, 110, 98];
+  bassLine.forEach((f, i) => {
+    note(ctx, f, T + i * b, b * 0.8, "square", 0.12, master);
   });
+
+  // Drums
+  for (let i = 0; i < 8; i++) {
+    kick(ctx, T + i * b, master);
+    if (i % 2 === 1) snare(ctx, T + i * b, master);
+    hihat(ctx, T + i * b * 0.5, 0.06, master);
+  }
+
+  // Chord stabs
+  [[523, 659, 784], [440, 554, 659], [494, 622, 740], [523, 659, 784]].forEach(([a, b2, c], i) => {
+    const st = T + i * b * 2;
+    note(ctx, a, st, b * 0.15, "square", 0.05, master);
+    note(ctx, b2, st, b * 0.15, "square", 0.05, master);
+    note(ctx, c, st, b * 0.15, "square", 0.05, master);
+  });
+}
+
+// ============================================================
+// LEVEL 2 — "BASE AFTER BASE" style: groovy electro house
+// ============================================================
+function playTrack2(ctx: AudioContext) {
+  const master = ctx.createGain();
+  master.gain.value = 0.7;
+  master.connect(ctx.destination);
+  const T = ctx.currentTime + 0.05;
+  const bpm = 128; const b = 60 / bpm;
+
+  // Synth lead — triangle, smooth
+  const lead = [440, 494, 523, 587, 659, 587, 523, 494, 440, 415, 440, 494, 523, 494, 440, 415];
+  lead.forEach((f, i) => note(ctx, f, T + i * b * 0.5, b * 0.48, "triangle", 0.07, master));
+
+  // Pad chords — sine, warm
+  [[220, 277, 330], [196, 247, 294], [220, 277, 330], [246, 311, 370]].forEach(([a, b2, c], i) => {
+    const st = T + i * b * 2;
+    note(ctx, a, st, b * 1.9, "sine", 0.06, master);
+    note(ctx, b2, st, b * 1.9, "sine", 0.06, master);
+    note(ctx, c, st, b * 1.9, "sine", 0.05, master);
+  });
+
+  // Funky bass
+  const bass = [110, 110, 138, 110, 123, 110, 138, 146];
+  bass.forEach((f, i) => {
+    note(ctx, f, T + i * b, b * 0.4, "square", 0.14, master);
+    note(ctx, f, T + i * b + b * 0.5, b * 0.35, "square", 0.09, master);
+  });
+
+  // Drums — 4-on-the-floor
+  for (let i = 0; i < 8; i++) {
+    kick(ctx, T + i * b, master);
+    if (i % 2 === 1) snare(ctx, T + i * b, master);
+    hihat(ctx, T + i * b, 0.05, master);
+    hihat(ctx, T + i * b + b * 0.5, 0.03, master);
+    hihat(ctx, T + i * b + b * 0.75, 0.02, master);
+  }
+}
+
+// ============================================================
+// LEVEL 3 — "CANT LET GO" style: aggressive dubstep + growl
+// ============================================================
+function playTrack3(ctx: AudioContext) {
+  const master = ctx.createGain();
+  master.gain.value = 0.65;
+  master.connect(ctx.destination);
+  const T = ctx.currentTime + 0.05;
+  const bpm = 150; const b = 60 / bpm;
+
+  // Aggressive lead
+  const lead = [698, 784, 880, 784, 698, 622, 698, 784, 880, 988, 880, 784, 698, 784, 698, 622];
+  lead.forEach((f, i) => note(ctx, f, T + i * b * 0.5, b * 0.42, "sawtooth", 0.055, master));
+
+  // Wobble bass drops
+  const wobbleFreqs = [87, 87, 98, 87, 110, 87, 98, 110];
+  wobbleFreqs.forEach((f, i) => wobbleBass(ctx, T + i * b, f, b * 0.95, master));
+
+  // High synth counter
+  const hi = [1047, 1175, 1319, 1175, 1047, 932, 1047, 1175];
+  hi.forEach((f, i) => note(ctx, f, T + i * b, b * 0.2, "square", 0.025, master));
+
+  // Hard drums
+  for (let i = 0; i < 8; i++) {
+    kick(ctx, T + i * b, master);
+    kick(ctx, T + i * b + b * 0.75, master); // double kick
+    if (i % 2 === 1) snare(ctx, T + i * b, master);
+    if (i % 4 === 2) snare(ctx, T + i * b + b * 0.5, master); // ghost snare
+    hihat(ctx, T + i * b * 0.5, 0.08, master);
+  }
+}
+
+function playLevelMusic(ctx: AudioContext, cfg: LevelConfig) {
+  if (cfg.id === 1) playTrack1(ctx);
+  else if (cfg.id === 2) playTrack2(ctx);
+  else playTrack3(ctx);
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
